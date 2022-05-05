@@ -41,7 +41,8 @@ def make_smol(img, dwn_f=10., gray=True, rotate=False) :
     #     mc = False
 
     # print(1/dwn_f)
-    img_smol = skimage.transform.downscale_local_mean(img, (dwn_f, dwn_f, 1)).astype(np.uint8)#[:-1, :-1]
+    img_smol = skimage.transform.downscale_local_mean(img, (dwn_f, dwn_f, 1))
+    # img_smol = skimage.transform.downscale_local_mean(img, (dwn_f, dwn_f, 1)).astype(np.uint8)#[:-1, :-1]
     # img_smol = skimage.transform.rescale(img, 1/dwn_f, anti_aliasing=True, multichannel=mc) #channel_axis=2) #this should work, but it doesn't
     # img_smol = skimage.transform.resize(img, (img.shape[0] // dwn_f, img.shape[1] // dwn_f, img.shape[2]), anti_aliasing=True) #this should work too, but it doesn't
     # img_smol = img[::dwn_f, ::dwn_f, :] # zero-order is really bad but seems to work-ish
@@ -159,36 +160,80 @@ def register_table(img) :
     dst  = np.array([[0,0], [img_size, 0], [img_size, img_size], [0, img_size]])
 
     tform = skimage.transform.estimate_transform('projective', corners, dst)
-    img_tf = skimage.transform.warp(img, tform.inverse, preserve_range=True)[0:img_size, 0:img_size].astype(np.uint8)
+    img_tf = skimage.transform.warp(img, tform.inverse)[0:img_size, 0:img_size]
 
     return img_tf, corners
+
+class TableSegments:
+    def __init__(self, p=[], T=[], c=[]):
+        self.p = p
+        self.T = T
+        self.c = c
+
+
+def segment_table(img) :
+    """
+    segments the table :
+    p1 p2 p3 p4 t chips
+    """
+
+    # player 1
+    xl, xh = int(1500/2000*img.shape[1]), int(2000/2000*img.shape[1])
+    yl, yh = int( 700/2000*img.shape[0]), int(1200/2000*img.shape[0])
+    p1     = np.flip(img[yl:yh, xl:xh].transpose(1,0,2), 1)
+
+    # player 2
+    xl, xh = int(1200/2000*img.shape[1]), int(1700/2000*img.shape[1])
+    yl, yh = int(   0/2000*img.shape[0]), int( 500/2000*img.shape[0])
+    p2     = np.flip(img[yl:yh, xl:xh], (0,1))
+
+    # player 3
+    xl, xh = int( 300/2000*img.shape[1]), int( 800/2000*img.shape[1])
+    yl, yh = int(   0/2000*img.shape[0]), int( 500/2000*img.shape[0])
+    p3     = np.flip(img[yl:yh, xl:xh], (0,1))
+
+    # player 4
+    xl, xh = int(   0/2000*img.shape[1]), int( 500/2000*img.shape[1])
+    yl, yh = int( 800/2000*img.shape[0]), int(1300/2000*img.shape[0])
+    p4     = np.flip(img[yl:yh, xl:xh].transpose(1,0,2), 0)
+
+    # table
+    xl, xh = int( 200/2000*img.shape[1]), int(1800/2000*img.shape[1])
+    yl, yh = int(1500/2000*img.shape[0]), int(2000/2000*img.shape[0])
+    T      = img[yl:yh, xl:xh]
+
+    # chips
+    xl, xh = int( 500/2000*img.shape[1]), int(1500/2000*img.shape[1])
+    yl, yh = int( 500/2000*img.shape[0]), int(1500/2000*img.shape[0])
+    c      = img[yl:yh, xl:xh]
+
+    output = TableSegments([p1, p2, p3, p4], T, c)
+
+    return output
+
+
 
 def equalize_table(img) :
     """
     equalizes the color of the table
     """
-    # img = skimage.color.rgb2hsv(img)
     # img_ref = get_img(img_type='out', n=0)
     # img = skimage.exposure.match_histograms(img, img_ref, multichannel=True)
 
     xl, xh = int( 300/2000*img.shape[0]), int(1000/2000*img.shape[0])
     yl, yh = int(1500/2000*img.shape[0]), int(1900/2000*img.shape[0])
 
-    img_patch = skimage.filters.gaussian(img[yl:yh, xl:xh], sigma=10, preserve_range=False, multichannel=True)
-    img = (skimage.img_as_float(img) / img_patch.max(axis=(0, 1))).clip(0, 1)
+    img_patch = skimage.filters.gaussian(img[yl:yh, xl:xh], sigma=10, multichannel=True)
+    img = ((skimage.img_as_float(img)-img_patch.min(axis=(0, 1))) / (img_patch.max(axis=(0, 1)) - img_patch.min(axis=(0, 1)))).clip(0, 1)
     # img[yl:yh, xl:xh] = img_patch/skimage.dtype_limits(img_patch)[1] # check
 
-    # for c in range(3) :
-    #     plow, phigh = np.percentile(img[:,:,c], (2, 99))
-    #     img[:,:,c] = skimage.exposure.rescale_intensity(img[:,:,c], (plow, phigh))
-
-    # img = skimage.color.hsv2rgb(img)
     return img
 
 
 # ###white point is (400, 1700)
 # img_ref = get_img(img_type='out', n=0)
 # show(img_ref)
+# plt.tight_layout()
 # plt.show()
 # exit()
 
@@ -196,7 +241,8 @@ if __name__ == '__main__' :
     import time
 
     n = 0
-    for n in [1,2,3,8,22,98,99] :
+    for n in [2,3] :#[1,2,3,8,11,22, 98, 99] :
+    # for n in [1,2,3,8,11,22, 98, 99] :
 
         print("img", n)
 
@@ -213,13 +259,42 @@ if __name__ == '__main__' :
             print("skipping image")
             continue # assume we were not able to detect the table
 
-        # equaze image color
         tic = time.time()
-        table = equalize_table(table)
-        print("--- %.3f seconds to equalize img table ---" % (time.time() - tic))
+        segments = segment_table(table)
+        print("--- %.3f seconds to segment table ---" % (time.time() - tic))
+
+
+        # show(segments[4])
+        # fig, axes = plt.subplots(1,4)
+        # [(ax.imshow(p), ax.axis('off')) for ax, p in zip(axes, segments[0:4])]
+
+
+        fig = plt.figure()
+
+        ax1 = fig.add_subplot(3,4,(1,4))
+        ax1.imshow(segments.c)
+        ax1.set_title("Chips")
+        ax1.axis('off')
+
+        ax1 = fig.add_subplot(3,4,(5,8))
+        ax1.imshow(segments.T)
+        ax1.set_title("T")
+        ax1.axis('off')
+
+        for i in range(4) :
+            ax = fig.add_subplot(3,4,9+i)
+            ax.imshow(segments.p[i])
+            ax.set_title("p{}".format(i+1))
+            ax.axis('off')
+
+
+        # equaze image color
+        # tic = time.time()
+        # table = equalize_table(table)
+        # print("--- %.3f seconds to equalize img table ---" % (time.time() - tic))
 
         # save to output
-        save_img(table, n)
+        # save_img(table, n)
 
         # clear memory
         del test, table
@@ -228,5 +303,5 @@ if __name__ == '__main__' :
     # plt.scatter(corners[:,0], corners[:,1], color='r')
     # show(table)
     #
-    # plt.tight_layout()
-    # plt.show()
+    plt.tight_layout()
+    plt.show()
