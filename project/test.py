@@ -1,5 +1,4 @@
 #!/usr/bin/env python3.8
-
 import os
 import numpy as np
 import skimage, skimage.io, skimage.color, skimage.filters, skimage.transform, skimage.exposure
@@ -35,21 +34,16 @@ def make_smol(img, dwn_f=10., gray=True, rotate=False) :
     downsample and grayscale a given image to reduce the computation time
     can also apply a (random) rotation, if desired (for testing/training)
     """
-    # if len(img.shape) == 3 :
-    #     mc = True
-    # else :
-    #     mc = False
+    if len(img.shape) == 3 :
+        dwn = (dwn_f, dwn_f, 1)
+    else :
+        dwn = (dwn_f, dwn_f)
 
-    # print(1/dwn_f)
-    img_smol = skimage.transform.downscale_local_mean(img, (dwn_f, dwn_f, 1))
-    # img_smol = skimage.transform.downscale_local_mean(img, (dwn_f, dwn_f, 1)).astype(np.uint8)#[:-1, :-1]
+
+    img_smol = skimage.transform.downscale_local_mean(img, dwn)
     # img_smol = skimage.transform.rescale(img, 1/dwn_f, anti_aliasing=True, multichannel=mc) #channel_axis=2) #this should work, but it doesn't
     # img_smol = skimage.transform.resize(img, (img.shape[0] // dwn_f, img.shape[1] // dwn_f, img.shape[2]), anti_aliasing=True) #this should work too, but it doesn't
     # img_smol = img[::dwn_f, ::dwn_f, :] # zero-order is really bad but seems to work-ish
-
-    # img_smol = img.reshape()
-    # show(img_smol)
-    # plt.show()
 
     if gray and len(img.shape) == 3 :
         img_smol = skimage.color.rgb2gray(img_smol)
@@ -170,32 +164,63 @@ class TableSegments:
         self.T = T
         self.c = c
 
+    def show(self, title='') :
+        fig = plt.figure()
+        plt.suptitle(title)
+
+        ax1 = fig.add_subplot(3,4,(1,4))
+        ax1.imshow(self.c)
+        ax1.set_title("Chips")
+        ax1.axis('off')
+
+        ax2 = fig.add_subplot(3,4,(5,8))
+        ax2.imshow(self.T)
+        ax2.set_title("T")
+        ax2.axis('off')
+
+        for i in range(4) :
+            ax = fig.add_subplot(3,4,9+i)
+            ax.imshow(self.p[i])
+            ax.set_title("p{}".format(i+1))
+            ax.axis('off')
+
+def get_center_of_mass(img):
+    y = range(0, img.shape[0])
+    x = range(0, img.shape[1])
+    (Y,X) = np.meshgrid(y,x)
+    img_g = skimage.color.rgb2gray(img)
+    com = np.array([(Y*img_g).sum(), (X*img_g).sum()])/img_g.sum()
+    return com
+
+def get_player(img, guess):
+    x = slice(max(int(guess[1]-.125*img.shape[1]), 0), min(int(guess[1]+.125*img.shape[1]), img.shape[1]))
+    y = slice(max(int(guess[0]-.125*img.shape[0]), 0), min(int(guess[0]+.125*img.shape[0]), img.shape[0]))
+    com    = get_center_of_mass(img[y, x]) + np.array([y.start, x.start])
+    x = slice(max(int(com[1]-.12*img.shape[1]), 0), min(int(com[1]+.12*img.shape[1]), img.shape[1]))
+    y = slice(max(int(com[0]-.12*img.shape[0]), 0), min(int(com[0]+.12*img.shape[0]), img.shape[0]))
+    return img[y, x]
 
 def segment_table(img) :
     """
-    segments the table :
-    p1 p2 p3 p4 t chips
+    segments the table into [p1 p2 p3 p4 t chips]
+    returns a TableSegments
     """
 
     # player 1
-    xl, xh = int(1500/2000*img.shape[1]), int(2000/2000*img.shape[1])
-    yl, yh = int( 700/2000*img.shape[0]), int(1200/2000*img.shape[0])
-    p1     = np.flip(img[yl:yh, xl:xh].transpose(1,0,2), 1)
+    guess = (1050/2000*img.shape[0], 1750/2000*img.shape[1])
+    p1     = np.flip(get_player(img, guess).transpose(1,0,2), 1)
 
     # player 2
-    xl, xh = int(1200/2000*img.shape[1]), int(1700/2000*img.shape[1])
-    yl, yh = int(   0/2000*img.shape[0]), int( 500/2000*img.shape[0])
-    p2     = np.flip(img[yl:yh, xl:xh], (0,1))
+    guess = ( 250/2000*img.shape[0], 1450/2000*img.shape[1])
+    p2     = np.flip(get_player(img, guess), (0,1))
 
     # player 3
-    xl, xh = int( 300/2000*img.shape[1]), int( 800/2000*img.shape[1])
-    yl, yh = int(   0/2000*img.shape[0]), int( 500/2000*img.shape[0])
-    p3     = np.flip(img[yl:yh, xl:xh], (0,1))
+    guess = ( 250/2000*img.shape[0],  550/2000*img.shape[1])
+    p3     = np.flip(get_player(img, guess), (0,1))
 
     # player 4
-    xl, xh = int(   0/2000*img.shape[1]), int( 500/2000*img.shape[1])
-    yl, yh = int( 800/2000*img.shape[0]), int(1300/2000*img.shape[0])
-    p4     = np.flip(img[yl:yh, xl:xh].transpose(1,0,2), 0)
+    guess = (1050/2000*img.shape[0],  250/2000*img.shape[1])
+    p4     = np.flip(get_player(img, guess).transpose(1,0,2), 0)
 
     # table
     xl, xh = int( 200/2000*img.shape[1]), int(1800/2000*img.shape[1])
@@ -211,6 +236,16 @@ def segment_table(img) :
 
     return output
 
+def check_card_back_presence(img, thresh=.3):
+    img_fft = np.fft.fft2(skimage.color.rgb2gray(img))
+    # img_fft = np.fft.fft2(skimage.filters.sobel(skimage.color.rgb2gray(img)))
+
+    auto_corr = np.abs(np.fft.ifft2(img_fft * np.conjugate(img_fft)))
+    auto_corr = (auto_corr-auto_corr.min()) / np.ptp(auto_corr)
+
+    # show(auto_corr[auto_corr.shape[0]//8:auto_corr.shape[0]//2, auto_corr.shape[1]//8:auto_corr.shape[1]//2])
+
+    return np.any(auto_corr[auto_corr.shape[0]//8:auto_corr.shape[0]//2, auto_corr.shape[1]//8:auto_corr.shape[1]//2] > thresh)
 
 
 def equalize_table(img) :
@@ -241,7 +276,7 @@ if __name__ == '__main__' :
     import time
 
     n = 0
-    for n in [2,3] :#[1,2,3,8,11,22, 98, 99] :
+    for n in [11] :
     # for n in [1,2,3,8,11,22, 98, 99] :
 
         print("img", n)
@@ -259,34 +294,14 @@ if __name__ == '__main__' :
             print("skipping image")
             continue # assume we were not able to detect the table
 
+        # segment the teable
         tic = time.time()
         segments = segment_table(table)
         print("--- %.3f seconds to segment table ---" % (time.time() - tic))
 
-
-        # show(segments[4])
-        # fig, axes = plt.subplots(1,4)
-        # [(ax.imshow(p), ax.axis('off')) for ax, p in zip(axes, segments[0:4])]
-
-
-        fig = plt.figure()
-
-        ax1 = fig.add_subplot(3,4,(1,4))
-        ax1.imshow(segments.c)
-        ax1.set_title("Chips")
-        ax1.axis('off')
-
-        ax1 = fig.add_subplot(3,4,(5,8))
-        ax1.imshow(segments.T)
-        ax1.set_title("T")
-        ax1.axis('off')
-
-        for i in range(4) :
-            ax = fig.add_subplot(3,4,9+i)
-            ax.imshow(segments.p[i])
-            ax.set_title("p{}".format(i+1))
-            ax.axis('off')
-
+        # show image
+        segments.show("train_{}.jpg".format(str(n).zfill(2)))
+        print([check_card_back_presence(p) for p in segments.p])
 
         # equaze image color
         # tic = time.time()
@@ -299,9 +314,5 @@ if __name__ == '__main__' :
         # clear memory
         del test, table
 
-    # show(test)
-    # plt.scatter(corners[:,0], corners[:,1], color='r')
-    # show(table)
-    #
     plt.tight_layout()
     plt.show()
