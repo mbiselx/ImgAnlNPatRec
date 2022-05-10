@@ -1,9 +1,10 @@
 #!/usr/bin/env python3.8
 import os
 import numpy as np
-import skimage, skimage.io, skimage.color, skimage.filters, skimage.transform, skimage.exposure
+import skimage, skimage.color, skimage.exposure, skimage.feature, skimage.filters, skimage.io, skimage.measure, skimage.transform
 import matplotlib.pyplot as plt
 
+training_set = list(range(28)) + [99]
 
 def get_img(n=0, img_type='train') :
     """
@@ -29,7 +30,7 @@ def save_img(img, n=0, img_type='out') :
 
     skimage.io.imsave(os.path.join(img_path, img_name), skimage.img_as_ubyte(img))
 
-def make_smol(img, dwn_f=10., gray=True, rotate=False) :
+def make_smol(img, dwn_f=10, gray=True, rotate=False) :
     """
     downsample and grayscale a given image to reduce the computation time
     can also apply a (random) rotation, if desired (for testing/training)
@@ -158,9 +159,45 @@ def register_table(img) :
 
     return img_tf, corners
 
+def check_card_back_presence(img, thresh=.4):
+    """
+    check for the presence of the pattern present on the backs of the cards
+    usin autocorrelation and a heuristic threshold
+    """
+    # img_fft    = np.fft.fft2(skimage.color.rgb2gray(img))
+    img_fft    = np.fft.fft2(skimage.filters.sobel(skimage.color.rgb2gray(img)))
+
+    auto_corr  = np.abs(np.fft.ifft2(img_fft * np.conjugate(img_fft)))
+    auto_corr  = (auto_corr-auto_corr.min()) / np.ptp(auto_corr)                # normalize
+    roi        = (slice(auto_corr.shape[0]//16, auto_corr.shape[0]//2),         # region of interest
+                  slice(auto_corr.shape[1]//16, auto_corr.shape[1]//2))
+
+    # show(auto_corr[roi])
+
+    return np.any(auto_corr[roi] > thresh)                                      # get pattern presence (i.e. autocorr. peaks)
+
+class PlayerSegment:
+    def __init__(self, id=0, img=np.array([]), has_folded=None):
+        self.id         = id
+        self.img        = img
+        if has_folded is not None :
+            self.has_folded = has_folded
+        elif len(img):
+            self.has_folded = check_card_back_presence(img)
+        else :
+            self.has_folded = False
+
+    def show(self, ax=None):
+        if not ax :
+            fig = plt.figure()
+            ax = fig.add_subplot(1,1,1)
+        ax.imshow(self.img)
+        ax.set_title("p{}: {}".format(self.id, "has folded" if self.has_folded else "is playing" ))
+        ax.axis('off')
+
 class TableSegments:
-    def __init__(self, p=[], T=[], c=[]):
-        self.p = p
+    def __init__(self, p=[PlayerSegment()], T=[], c=[]):
+        self.player = p
         self.T = T
         self.c = c
 
@@ -180,139 +217,304 @@ class TableSegments:
 
         for i in range(4) :
             ax = fig.add_subplot(3,4,9+i)
-            ax.imshow(self.p[i])
-            ax.set_title("p{}".format(i+1))
-            ax.axis('off')
+            self.player[i].show(ax)
 
 def get_center_of_mass(img):
-    y = range(0, img.shape[0])
-    x = range(0, img.shape[1])
-    (Y,X) = np.meshgrid(y,x)
-    img_g = skimage.color.rgb2gray(img)
-    com = np.array([(Y*img_g).sum(), (X*img_g).sum()])/img_g.sum()
+    """
+    calculate center of mass of a grayscale picture
+    """
+    img_gray = skimage.color.rgb2gray(img)
+    (X,Y) = np.meshgrid(range(0, img.shape[1]), range(0, img.shape[0]))
+    com   = np.array([(Y*img_gray).sum(), (X*img_gray).sum()])/img_gray.sum()
     return com
 
-def get_player(img, guess):
-    x = slice(max(int(guess[1]-.125*img.shape[1]), 0), min(int(guess[1]+.125*img.shape[1]), img.shape[1]))
-    y = slice(max(int(guess[0]-.125*img.shape[0]), 0), min(int(guess[0]+.125*img.shape[0]), img.shape[0]))
-    com    = get_center_of_mass(img[y, x]) + np.array([y.start, x.start])
-    x = slice(max(int(com[1]-.12*img.shape[1]), 0), min(int(com[1]+.12*img.shape[1]), img.shape[1]))
-    y = slice(max(int(com[0]-.12*img.shape[0]), 0), min(int(com[0]+.12*img.shape[0]), img.shape[0]))
+    # img_hsv      = skimage.color.rgb2hsv(img)
+    # (X,Y)        = np.meshgrid(range(0, img.shape[1]), range(0, img.shape[0]))
+    #
+    # black_idx    = img_hsv[:,:,2] < .25
+    # red_idx      = np.logical_and(np.logical_or(img_hsv[:,:,0] < .05, img_hsv[:,:,0] > .95), img_hsv[:,:,1] > .6)
+    # relevant_idx = np.logical_or(red_idx, black_idx)
+    # x, y         = X[relevant_idx].sum(), Y[relevant_idx].sum()
+    #
+    # return np.array([y,x])/np.count_nonzero(relevant_idx)
+
+def get_center_of_cards(img, thresh=.3) :
+    """
+    extract the edges of the image -- assume the center of the cards corresponds to the centroid of the edges
+    """
+    # img_sobel    = skimage.filters.sobel(skimage.color.rgb2gray(img))
+    # img_edg      = img_sobel > thresh*img_sobel.max()
+    img_edg      = skimage.feature.canny(skimage.color.rgb2gray(img), sigma=3)
+    (X,Y)        = np.meshgrid(range(0, img.shape[1]), range(0, img.shape[0]))
+    com          = np.array([Y[img_edg].sum(), X[img_edg].sum()])/np.count_nonzero(img_edg)
+
+    # idx = img_edg.nonzero()
+    # yl, yr = np.min(idx[0]), np.max(idx[0])
+    # xl, xr = np.min(idx[1]), np.max(idx[1])
+    # y = (yr-yl)/2 + yl
+    # x = (xr-xl)/2 + xl
+    # com = np.array([y,x])
+
+    return com
+
+def get_player_img(img, guess):
+    """
+    takes a full table image and a guess at the location of the player's cards
+    returns an image segment centered around the player's cards
+    (unless the cards are face downwards -- then it returns nonsense)
+    """
+    x   = slice(max(int(guess[1]-.125*img.shape[1]), 0), min(int(guess[1]+.125*img.shape[1]), img.shape[1]))
+    y   = slice(max(int(guess[0]-.125*img.shape[0]), 0), min(int(guess[0]+.125*img.shape[0]), img.shape[0]))
+    com = get_center_of_cards(img[y, x]) + np.array([y.start, x.start])
+    x   = slice(max(int(com[1]-.13*img.shape[1]), 0), min(int(com[1]+.13*img.shape[1]), img.shape[1]))
+    y   = slice(max(int(com[0]-.13*img.shape[0]), 0), min(int(com[0]+.13*img.shape[0]), img.shape[0]))
     return img[y, x]
+
+def segment_table_simple(img) :
+    """
+    segments the table into [p1 p2 p3 p4 t chips]
+    returns a TableSegments
+    """
+    output = TableSegments()
+
+    # player 1
+    guess = slice(int( 750/2000*img.shape[0]), int(1250/2000*img.shape[1])), \
+            slice(int(1500/2000*img.shape[1]), int(2000/2000*img.shape[1]))
+    p1     = np.flip(img[guess].transpose(1,0,2), 1)
+    output.player = [PlayerSegment(id=1, img=p1)]
+
+    # player 2
+    guess = slice(int(   0/2000*img.shape[0]), int( 500/2000*img.shape[1])), \
+            slice(int(1150/2000*img.shape[1]), int(1650/2000*img.shape[1]))
+    p2     = np.flip(img[guess], (0,1))
+    output.player.append(PlayerSegment(id=2, img=p2))
+
+    # player 3
+    guess = slice(int(   0/2000*img.shape[0]), int( 500/2000*img.shape[1])), \
+            slice(int( 300/2000*img.shape[1]), int( 800/2000*img.shape[1]))
+    p3     = np.flip(img[guess], (0,1))
+    output.player.append(PlayerSegment(id=3, img=p3))
+
+    # player 4
+    guess = slice(int( 800/2000*img.shape[0]), int(1300/2000*img.shape[1])), \
+            slice(int(   0/2000*img.shape[1]), int( 500/2000*img.shape[1]))
+    p4     = np.flip(img[guess].transpose(1,0,2), 0)
+    output.player.append(PlayerSegment(id=4, img=p4))
+
+    # table
+    xl, xh = int( 200/2000*img.shape[1]), int(1800/2000*img.shape[1])
+    yl, yh = int(1500/2000*img.shape[0]), int(2000/2000*img.shape[0])
+    output.T = img[yl:yh, xl:xh]
+
+    # chips
+    xl, xh = int( 500/2000*img.shape[1]), int(1500/2000*img.shape[1])
+    yl, yh = int( 500/2000*img.shape[0]), int(1500/2000*img.shape[0])
+    output.c = img[yl:yh, xl:xh]
+
+    return output
 
 def segment_table(img) :
     """
     segments the table into [p1 p2 p3 p4 t chips]
     returns a TableSegments
     """
+    output = TableSegments()
 
     # player 1
-    guess = (1050/2000*img.shape[0], 1750/2000*img.shape[1])
-    p1     = np.flip(get_player(img, guess).transpose(1,0,2), 1)
+    guess = (1000/2000*img.shape[0], 1750/2000*img.shape[1])
+    p1     = np.flip(get_player_img(img, guess).transpose(1,0,2), 1)
+    output.player = [PlayerSegment(id=1, img=p1)]
 
     # player 2
-    guess = ( 250/2000*img.shape[0], 1450/2000*img.shape[1])
-    p2     = np.flip(get_player(img, guess), (0,1))
+    guess = ( 250/2000*img.shape[0], 1425/2000*img.shape[1])
+    p2     = np.flip(get_player_img(img, guess), (0,1))
+    output.player.append(PlayerSegment(id=2, img=p2))
 
     # player 3
     guess = ( 250/2000*img.shape[0],  550/2000*img.shape[1])
-    p3     = np.flip(get_player(img, guess), (0,1))
+    p3     = np.flip(get_player_img(img, guess), (0,1))
+    output.player.append(PlayerSegment(id=3, img=p3))
 
     # player 4
     guess = (1050/2000*img.shape[0],  250/2000*img.shape[1])
-    p4     = np.flip(get_player(img, guess).transpose(1,0,2), 0)
+    p4     = np.flip(get_player_img(img, guess).transpose(1,0,2), 0)
+    output.player.append(PlayerSegment(id=4, img=p4))
 
     # table
     xl, xh = int( 200/2000*img.shape[1]), int(1800/2000*img.shape[1])
     yl, yh = int(1500/2000*img.shape[0]), int(2000/2000*img.shape[0])
-    T      = img[yl:yh, xl:xh]
+    output.T = img[yl:yh, xl:xh]
 
     # chips
     xl, xh = int( 500/2000*img.shape[1]), int(1500/2000*img.shape[1])
     yl, yh = int( 500/2000*img.shape[0]), int(1500/2000*img.shape[0])
-    c      = img[yl:yh, xl:xh]
-
-    output = TableSegments([p1, p2, p3, p4], T, c)
+    output.c = img[yl:yh, xl:xh]
 
     return output
 
-def check_card_back_presence(img, thresh=.3):
-    img_fft = np.fft.fft2(skimage.color.rgb2gray(img))
-    # img_fft = np.fft.fft2(skimage.filters.sobel(skimage.color.rgb2gray(img)))
+def get_mean_range(img, thresh_lo=None, thresh_hi=None):
+    img_gray   = skimage.color.rgb2gray(img)
 
-    auto_corr = np.abs(np.fft.ifft2(img_fft * np.conjugate(img_fft)))
-    auto_corr = (auto_corr-auto_corr.min()) / np.ptp(auto_corr)
+    if thresh_lo == None :
+        thresh_lo = np.percentile(img_gray, 5)
+    if thresh_hi == None :
+        thresh_hi = np.percentile(img_gray, 90)
 
-    # show(auto_corr[auto_corr.shape[0]//8:auto_corr.shape[0]//2, auto_corr.shape[1]//8:auto_corr.shape[1]//2])
+    black_idx  = np.logical_and(img_gray < thresh_lo, np.all(img < .4*img.max(), axis=2))
+    mean_black = img[black_idx].mean(0) if np.any(black_idx) else np.array([])
 
-    return np.any(auto_corr[auto_corr.shape[0]//8:auto_corr.shape[0]//2, auto_corr.shape[1]//8:auto_corr.shape[1]//2] > thresh)
+    white_idx  = img_gray > thresh_hi
+    mean_white = img[white_idx].mean(0)
 
+    return mean_black, mean_white
 
-def equalize_table(img) :
+def apply_linear_rescale(img, mean_black=np.array([0,0,0]), mean_white=np.array([1,1,1])) :
+    return ((img - mean_black) / (mean_white-mean_black)).clip(0,1)
+
+def apply_logistic_rescale(img, mean_black=np.array([0,0,0]), mean_white=np.array([1,1,1])) :
+    if not len(mean_black) :
+        mean_black = np.array([0,0,0])
+    if not len(mean_white) :
+        mean_white = np.array([1,1,1])
+
+    x  = (img - mean_black) / (mean_white-mean_black) # linear rescale
+    return 1/(1+np.exp(-4*x + 2)) # sigmoid suqishing
+
+def equalize_img(img) :
     """
     equalizes the color of the table
     """
     # img_ref = get_img(img_type='out', n=0)
     # img = skimage.exposure.match_histograms(img, img_ref, multichannel=True)
 
-    xl, xh = int( 300/2000*img.shape[0]), int(1000/2000*img.shape[0])
-    yl, yh = int(1500/2000*img.shape[0]), int(1900/2000*img.shape[0])
-
-    img_patch = skimage.filters.gaussian(img[yl:yh, xl:xh], sigma=10, multichannel=True)
-    img = ((skimage.img_as_float(img)-img_patch.min(axis=(0, 1))) / (img_patch.max(axis=(0, 1)) - img_patch.min(axis=(0, 1)))).clip(0, 1)
+    # xl, xh = int( 300/2000*img.shape[0]), int(1000/2000*img.shape[0])
+    # yl, yh = int(1500/2000*img.shape[0]), int(1900/2000*img.shape[0])
+    #
+    # img_patch = skimage.filters.gaussian(img[yl:yh, xl:xh], sigma=10, multichannel=True)
+    # img = ((skimage.img_as_float(img)-img_patch.min(axis=(0, 1))) / (img_patch.max(axis=(0, 1)) - img_patch.min(axis=(0, 1)))).clip(0, 1)
     # img[yl:yh, xl:xh] = img_patch/skimage.dtype_limits(img_patch)[1] # check
 
-    return img
+    mean_black, mean_white = get_mean_range(img)
+    return apply_linear_rescale(img, mean_black, mean_white)
 
+def equalize_table(segments=TableSegments()) :
+    """
+    equalize the color of the table segments
+    """
+    mean_black, mean_white = [], []
+    for p in segments.player :
+        if not p.has_folded :
+            mb, mw = get_mean_range(p.img)
+            if len(mb) : mean_black.append(mb)
+            if len(mw) : mean_white.append(mw)
+    mb, mw = get_mean_range(segments.T)
+    if len(mb) : mean_black.append(mb)
+    if len(mw) : mean_white.append(mw)
 
-# ###white point is (400, 1700)
-# img_ref = get_img(img_type='out', n=0)
+    segments.mean_black = np.array(mean_black).mean(0)
+    segments.mean_white = np.array(mean_white).mean(0)
+
+    for p in segments.player :
+        p.img = apply_logistic_rescale(p.img, segments.mean_black, segments.mean_white)
+    segments.T = apply_logistic_rescale(segments.T , segments.mean_black, segments.mean_white)
+    segments.c = apply_logistic_rescale(segments.c , segments.mean_black, segments.mean_white)
+
+    return segments
+
+##white point is at (70, 66)
+# img_ref = get_img(img_type='out', n=1)
+# com = get_center_of_mass(img_ref)
+# print(com)
 # show(img_ref)
+# plt.scatter(com[0], com[1])
 # plt.tight_layout()
 # plt.show()
 # exit()
 
+
+# a = np.array([[  0,  0,  0,  0,  0,  0,  0],
+#               [  0,  0, -1,  0,  3,  0,  0],
+#               [  0,  0,  1,  0,  1,  0,  0],
+#               [  0,  0,  0,  1,  0,  0,  0],
+#               [  0,  0,  0,  0,  0,  0,  0]])
+# print(a)
+# b = a.nonzero()
+# y = slice(np.min(b[0]), np.max(b[0])+1)
+# x = slice(np.min(b[1]), np.max(b[1])+1)
+# print(a[y,x])
+# exit()
+
+
+
+
+
 if __name__ == '__main__' :
     import time
 
-    n = 0
-    for n in [11] :
-    # for n in [1,2,3,8,11,22, 98, 99] :
+    m = 0;
+
+    for n in training_set:
+    # for n in [99] :
+    # for n in [1,2,3,8,21,22] :
+    # for n in [1,2,3,8,11,15,22] :
 
         print("img", n)
 
-        #get img
-        tic = time.time()
-        test =  get_img(n)[::2,::2,:]
-        print("--- %.3f seconds to load image ---" % (time.time() - tic))
+        # # get img
+        # tic = time.time()
+        # test =  get_img(n)[::2,::2,:]
+        # print("--- %.3f seconds to load image ---" % (time.time() - tic))
+        #
+        # # register & get corners
+        # tic = time.time()
+        # table, corners = register_table(test)
+        # print("--- %.3f seconds to register table ---" % (time.time() - tic))
+        # if not len(corners) :
+        #     print("skipping image")
+        #     continue # assume we were not able to detect the table
+        #
+        # # save to output
+        # save_img(table, n, img_type="table")
 
-        # register & get corners
+        # load in the registered table
         tic = time.time()
-        table, corners = register_table(test)
-        print("--- %.3f seconds to register table ---" % (time.time() - tic))
-        if not len(corners) :
-            print("skipping image")
-            continue # assume we were not able to detect the table
+        table = get_img(n, img_type='table')
+        print("--- %.3f seconds to load table ---" % (time.time() - tic))
 
         # segment the teable
         tic = time.time()
+        # segments = segment_table_simple(table)
         segments = segment_table(table)
         print("--- %.3f seconds to segment table ---" % (time.time() - tic))
 
-        # show image
-        segments.show("train_{}.jpg".format(str(n).zfill(2)))
-        print([check_card_back_presence(p) for p in segments.p])
+        # get color equalization parameters
+        tic = time.time()
+        segments = equalize_table(segments)
+        print("--- %.3f seconds to recolor table ---" % (time.time() - tic))
 
-        # equaze image color
+        # # equalizes the color of the tables
         # tic = time.time()
-        # table = equalize_table(table)
-        # print("--- %.3f seconds to equalize img table ---" % (time.time() - tic))
+        # table_eq = apply_logistic_rescale(table , segments.mean_black, segments.mean_white)
+        # print("--- %.3f seconds to equalize color ---" % (time.time() - tic))
+        #
+        # # save to output
+        # save_img(table_eq, n, img_type="table_eq")
+
+        # show image
+        # segments.show("train_{}.jpg".format(str(n).zfill(2)))
 
         # save to output
-        # save_img(table, n)
+        for i in range(4) :
+            if not segments.player[i].has_folded :
+                save_img(segments.player[i].img, m, img_type="cards")
+            else :
+                save_img(segments.player[i].img, m, img_type="folds")
+            m = m+1
 
         # clear memory
-        del test, table
+        # del test
+        # del table
+        # del segments
 
     plt.tight_layout()
     plt.show()
