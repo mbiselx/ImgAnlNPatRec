@@ -1,7 +1,7 @@
 #!/usr/bin/env python3.8
 import os
 import numpy as np
-import skimage, skimage.color, skimage.exposure, skimage.feature, skimage.filters, skimage.io, skimage.measure, skimage.transform
+import skimage, skimage.color, skimage.exposure, skimage.feature, skimage.filters, skimage.io, skimage.measure, skimage.morphology, skimage.transform
 import matplotlib.pyplot as plt
 
 training_set = list(range(28)) + [99]
@@ -64,6 +64,7 @@ def show(img, title='') :
     plt.imshow(img, cmap='gray')
     plt.title(title + ' ' + str(img.shape))
     plt.axis('off')
+    plt.tight_layout()
 
 def get_intersect(d1,a1, d2,a2) :
     """
@@ -155,7 +156,7 @@ def register_table(img) :
     dst  = np.array([[0,0], [img_size, 0], [img_size, img_size], [0, img_size]])
 
     tform = skimage.transform.estimate_transform('projective', corners, dst)
-    img_tf = skimage.transform.warp(img, tform.inverse)[0:img_size, 0:img_size]
+    img_tf = skimage.transform.warp(img, tform.inverse, output_shape=(img_size, img_size))
 
     return img_tf, corners
 
@@ -194,6 +195,8 @@ class PlayerSegment:
         ax.imshow(self.img)
         ax.set_title("p{}: {}".format(self.id, "has folded" if self.has_folded else "is playing" ))
         ax.axis('off')
+        if not ax :
+            fig.tight_layout()
 
 class TableSegments:
     def __init__(self, p=[PlayerSegment()], T=[], c=[]):
@@ -218,6 +221,8 @@ class TableSegments:
         for i in range(4) :
             ax = fig.add_subplot(3,4,9+i)
             self.player[i].show(ax)
+
+        fig.tight_layout()
 
 def get_center_of_mass(img):
     """
@@ -380,19 +385,37 @@ def apply_logistic_rescale(img, mean_black=np.array([0,0,0]), mean_white=np.arra
     x  = (img - mean_black) / (mean_white-mean_black) # linear rescale
     return 1/(1+np.exp(-4*x + 2)) # sigmoid suqishing
 
+def apply_statistical_rescale(img, target_mean=180, target_std=30, range_type='squish') :
+
+    mm = np.mean(img, axis=(0,1)) # get current mean
+
+    if target_std is None :
+        if target_mean is None:
+            return img
+        else :
+            img_eq = img  + (target_mean - mm)
+    else :
+        ss = np.std(img, axis=(0,1)) # get current std
+        if target_mean is None :
+            img_eq = target_std/ss * (img - mm) + mm
+        else :
+            img_eq = target_std/ss * (img - mm) + target_mean
+
+
+    if range_type == 'clip' :
+        return (img_eq/img.max()).clip(0,1)
+    # else :
+    #     return 1/(1+np.exp(-img_eq/64 + 2))
+    elif target_mean is None :
+        return 1/(1+np.exp(-img_eq/64 + 2))
+    else:
+        return 1/(1+np.exp(-img_eq/64 + 2*target_mean/255))
+
+
 def equalize_img(img) :
     """
     equalizes the color of the table
     """
-    # img_ref = get_img(img_type='out', n=0)
-    # img = skimage.exposure.match_histograms(img, img_ref, multichannel=True)
-
-    # xl, xh = int( 300/2000*img.shape[0]), int(1000/2000*img.shape[0])
-    # yl, yh = int(1500/2000*img.shape[0]), int(1900/2000*img.shape[0])
-    #
-    # img_patch = skimage.filters.gaussian(img[yl:yh, xl:xh], sigma=10, multichannel=True)
-    # img = ((skimage.img_as_float(img)-img_patch.min(axis=(0, 1))) / (img_patch.max(axis=(0, 1)) - img_patch.min(axis=(0, 1)))).clip(0, 1)
-    # img[yl:yh, xl:xh] = img_patch/skimage.dtype_limits(img_patch)[1] # check
 
     mean_black, mean_white = get_mean_range(img)
     return apply_linear_rescale(img, mean_black, mean_white)
@@ -414,12 +437,20 @@ def equalize_table(segments=TableSegments()) :
     segments.mean_black = np.array(mean_black).mean(0)
     segments.mean_white = np.array(mean_white).mean(0)
 
+    # for p in segments.player :
+    #     p.img = apply_logistic_rescale(p.img, segments.mean_black, segments.mean_white)
+    # segments.T = apply_logistic_rescale(segments.T , segments.mean_black, segments.mean_white)
+    # segments.c = apply_logistic_rescale(segments.c , segments.mean_black, segments.mean_white)
+
     for p in segments.player :
-        p.img = apply_logistic_rescale(p.img, segments.mean_black, segments.mean_white)
-    segments.T = apply_logistic_rescale(segments.T , segments.mean_black, segments.mean_white)
-    segments.c = apply_logistic_rescale(segments.c , segments.mean_black, segments.mean_white)
+        p.img = apply_linear_rescale(p.img, segments.mean_black, segments.mean_white)
+    segments.T = apply_linear_rescale(segments.T , segments.mean_black, segments.mean_white)
+    segments.c = apply_linear_rescale(segments.c , segments.mean_black, segments.mean_white)
 
     return segments
+
+
+
 
 ##white point is at (70, 66)
 # img_ref = get_img(img_type='out', n=1)
@@ -453,9 +484,9 @@ if __name__ == '__main__' :
 
     m = 0;
 
-    for n in training_set:
+    # for n in training_set:
     # for n in [99] :
-    # for n in [1,2,3,8,21,22] :
+    for n in [1,2,3,8,21,22] :
     # for n in [1,2,3,8,11,15,22] :
 
         print("img", n)
@@ -501,15 +532,15 @@ if __name__ == '__main__' :
         # save_img(table_eq, n, img_type="table_eq")
 
         # show image
-        # segments.show("train_{}.jpg".format(str(n).zfill(2)))
+        segments.show("train_{}.jpg".format(str(n).zfill(2)))
 
         # save to output
-        for i in range(4) :
-            if not segments.player[i].has_folded :
-                save_img(segments.player[i].img, m, img_type="cards")
-            else :
-                save_img(segments.player[i].img, m, img_type="folds")
-            m = m+1
+        # for i in range(4) :
+        #     if not segments.player[i].has_folded :
+        #         save_img(segments.player[i].img, m, img_type="cards")
+        #     else :
+        #         save_img(segments.player[i].img, m, img_type="folds")
+        #     m = m+1
 
         # clear memory
         # del test

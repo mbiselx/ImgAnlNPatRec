@@ -1,21 +1,19 @@
 #!/usr/bin/env python3.8
 
-from test import *
 import time
+from cycler import cycler
+import matplotlib
 
+from test import *
 
-# for n in training_set :
-#     print("img", n)
-#     table = get_img(n, img_type='table_eq')
-#     save_img(skimage.color.rgb2hsv(table), n, img_type="table_hsv")
-# exit()
-
-
+def sigmoid(x) :
+    return 1/(1+np.exp(-4*x + 2))
 
 m = 0
-# for n in [1,2,3,8,21,22] :
-# for n in [1] :
-for n in training_set :
+
+for n in [0,1,8,11,21,22] :
+# for n in [15] :
+# for n in training_set :
     print("img", n)
 
 
@@ -24,32 +22,28 @@ for n in training_set :
     table = get_img(n, img_type='table')
     print("--- %.3f seconds to load table ---" % (time.time() - tic))
 
-    # segment the teable
     tic = time.time()
-    segments = segment_table_simple(table)
-    # segments = segment_table(table)
-    print("--- %.3f seconds to segment table ---" % (time.time() - tic))
+    table_eq = apply_statistical_rescale(table, target_std=None)#, range_type='clip')
+    print("--- %.3f seconds to equalize table ---" % (time.time() - tic))
+    del table
+    # show(table_eq, "img {}".format(n))
+    # save_img(table_eq, n, "table_eq")
 
-    for player in segments.player :
-        if player.has_folded :
-            continue
-        img_canny = skimage.feature.canny(skimage.color.rgb2gray(player.img), sigma=1)
-        # _ , angles, dists = skimage.transform.hough_line_peaks(*skimage.transform.hough_line(img_canny), num_peaks=4)
-        # # get all intersections
-        # intersects = []
-        # for i in range(len(angles)-1) :
-        #     [intersects.append(get_intersect(dists[i],angles[i], d,a)) for d, a in zip(dists[i+1:], angles[i+1:])]
-        # intersects = np.array(list(filter(np.any, intersects)))
-        # # only take intersections in image area
-        # intersects = intersects[np.logical_and(np.logical_and(intersects[:,0] > 0, intersects[:,0] < player.img.shape[1]),
-        #                                        np.logical_and(intersects[:,1] > 0, intersects[:,1] < player.img.shape[0]))]
+    # load in the equalized table
+    # tic = time.time()
+    # table = get_img(n, img_type='table_eq')
+    # print("--- %.3f seconds to load table ---" % (time.time() - tic))
 
-        # show(img_canny)
-        # plt.scatter(intersects[:,0], intersects[:,1])
-        # all_cont  = skimage.measure.find_contours(img, 0.1*img.max())
-        # long_cont = max(all_cont, key=len)
-        # p.show()
-        # plt.plot(long_cont[:, 1], long_cont[:, 0], color='g', linewidth=2)
+    # show(table_eq, str(n))
 
-plt.tight_layout()
+    # tidx = skimage.color.rgb2gray(table_eq) < 0.65
+    # # tidx = skimage.morphology.binary_closing(tidx,  skimage.morphology.disk(3))
+    # table[tidx] = 0
+
+    # table_eq[skimage.filters.gaussian(skimage.color.rgb2gray(table_eq) < 0.80] = 0
+    # show(table_eq, str(n))
+
+    img_edg = skimage.feature.canny(skimage.color.rgb2gray(table_eq), sigma=1.5)
+    show(img_edg, str(n))
+
 plt.show()
