@@ -9,6 +9,11 @@ import matplotlib.pyplot as plt
 # general image pre-procsesing functions
 ################################################################################
 
+
+##########################
+# general utility functions
+##########################
+
 def get_img(n=0, img_type='train') :
     """
     laod an image from the dataset
@@ -180,8 +185,6 @@ def apply_statistical_equalization(img, target_mean=0.7, target_std=12, range_ty
         return 1/(1+np.exp(-4*img_eq/img.max() + 2*target_mean))
 
 
-
-
 ##########################
 # player card analysis
 ##########################
@@ -216,7 +219,6 @@ def check_card_back_presence(img, thresh=.4):
 ################################################################################
 # utlilty classes
 ################################################################################
-
 
 class PlayerSegment:
     def __init__(self, id=0, img=np.array([]), guess=None, is_rotated=False, has_folded=None):
@@ -267,7 +269,6 @@ class PlayerSegment:
         x   = slice(max(int(com[1]-.13*img.shape[1]), 0), min(int(com[1]+.13*img.shape[1]), img.shape[1]))
         y   = slice(max(int(com[0]-.13*img.shape[0]), 0), min(int(com[0]+.13*img.shape[0]), img.shape[0]))
         return img[y, x]
-
 
 class TableSegments:
     def __init__(self, img, is_registered=False, is_equalized=False):
@@ -334,16 +335,15 @@ class TableSegments:
         fig.tight_layout()
 
 
-
-
-
 ################################################################################
 # testing
 ################################################################################
 
 if __name__ == '__main__' :
+    training_set = list(range(28)) + [99]
+
     for n in [1,2,3,8,21,22] :
-    # for n in [1,2,3,8,11,15,22] :
+    # for n in training_set:
 
         print("img", n)
         # get img
