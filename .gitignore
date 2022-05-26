@@ -262,6 +262,8 @@ dmypy.json
 
 ##########################
 #added by michael
-*/data/
+*/data/*
 !*/data/?/
+!*/data/?/*
 !*/data/10/
+!*/data/10/*
