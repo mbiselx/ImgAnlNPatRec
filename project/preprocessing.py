@@ -441,10 +441,6 @@ class TableSegments:
         fig = plt.figure()
         plt.suptitle(title)
 
-        # ax1 = fig.add_subplot(3,4,(1,4))
-        # ax1.imshow(self.c)
-        # ax1.set_title("Chips")
-        # ax1.axis('off')
         ax1 = fig.add_subplot(3,4,(1,4))
         self.chips.show(ax1)
 
@@ -477,23 +473,23 @@ if __name__ == '__main__' :
 
 
     # for n in [1,2,3,8,21,22] :
-    for n in [0, 1] :
-    # for n in training_set:
+    # for n in [0, 1] :
+    for n in training_set:
 
         # get img
         print("\nprocessing img %d:" % n)
 
-        tic = time.time()
-        img =  get_img(n)[::2,::2,:]
-        print("-- %.3f seconds to load image" % (time.time() - tic))
-
-        tic = time.time()
-        segments = TableSegments(img)
-        print("-- %.3f seconds to segment image" % (time.time() - tic))
-
-        tic = time.time()
-        segments.save(n)
-        print("-- %.3f seconds to save images" % (time.time() - tic))
+        # tic = time.time()
+        # img =  get_img(n)[::2,::2,:]
+        # print("-- %.3f seconds to load image" % (time.time() - tic))
+        #
+        # tic = time.time()
+        # segments = TableSegments(img)
+        # print("-- %.3f seconds to segment image" % (time.time() - tic))
+        #
+        # tic = time.time()
+        # segments.save(n)
+        # print("-- %.3f seconds to save images" % (time.time() - tic))
 
         # tic = time.time()
         # img =  get_img(n, img_type='table_eq')
