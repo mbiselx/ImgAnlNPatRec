@@ -173,7 +173,7 @@ def detect_card_symbols(img, card_space, thresh=0.15, min_dist=20, nb_vals=None)
     to_remove = set()
     for i, num1 in enumerate(detected_nums) :
         for j, num2 in enumerate(detected_nums)  :
-            if i == j : break
+            if j <= i : continue
             if np.linalg.norm(num1[1] - num2[1]) < min_dist :         # compare locations (only one number can be in a single spot)
                 to_remove.add(i if num1[2] > num2[2] else j)                    # compare cardspace_distance (chose the most likely number)
     detected_nums = [v for i, v in enumerate(detected_nums) if i not in to_remove]
@@ -203,7 +203,7 @@ def guess_cards(img, card_space, expected_cards, disp=False, title='') :
 
     # associate each value with a suit, if possible
     to_remove_v, to_remove_s = set(), set()
-    iterator = list(enumerate(vals)) # make iterator before looping
+    iterator = list(enumerate(vals)) # make iterator before appending
     for i, v in iterator :
         ss = [(s, j) for j, s in enumerate(suits) if j not in to_remove_s and (np.linalg.norm(v[1] - s[1]) < 40)]
         if len(ss) :
@@ -218,43 +218,58 @@ def guess_cards(img, card_space, expected_cards, disp=False, title='') :
 
     # first try to detect the cards that are fully visible
     to_remove_v, to_remove_s = set(), set()
-    iterator = list(enumerate(vals))
-    for i, v1 in iterator :
-        for j, v2 in iterator :
-            if i == j : break
-            if (i in to_remove_v or j in to_remove_v) : continue
+    for i, v1 in enumerate(vals) :
+        for j, v2 in enumerate(vals) :
+            if j <= i : continue #break
+            # if (i in to_remove_v or j in to_remove_v) : continue
 
             if np.linalg.norm(v2[1] - v1[1]) < 400 :
+
+                intersect = ''.join([c for c in v1[0] if c in v2[0]])
+                # print(v1[0], v2[0], intersect)
+
                 # spacial case 1 : we've detected a specific card
                 # OR
                 # spacial case 2 : we have a detected a similar value, but no suit
                 # OR
                 # spacial case 3 : confusion between 6 and 9
-                intersect = ''.join([c for c in v1[0] if c in v2[0]])
                 if (intersect == v1[0] and intersect == v2[0]) or               \
-                   (len(intersect) and intersect[-1] not in ['C', 'D', 'H', 'S']):
+                   (len(intersect) and intersect[-1] not in ['C', 'D', 'H', 'S']) or \
+                   (v1[0][0] == '6' and v2[0][0] == '9') or (v1[0][0] == '9' and v2[0][0] == '6'):
+
+                    # print(v1[0], v2[0], intersect)
+
                     loc = .5*(v1[1] + v2[1])
                     if loc[0] < img.shape[0] * 1./3. or loc[0] > img.shape[0] * 2./3. :
                         break # the card location doesn't make sense
-                    val = intersect
-                    lik = .5*(v1[2] + v2[2])
-                    if val[-1] not in ['C', 'D', 'H', 'S'] :
-                        ss = [(s, k) for k, s in enumerate(suits) if k not in to_remove_s and (np.linalg.norm(v1[1] - s[1]) < 60 or np.linalg.norm(v2[1] - s[1]) < 60)]
-                        s, k = min(ss, key=lambda elem: elem[0][2]) if len(ss) else ('', None)
-                        if s :
+
+                    if not len(intersect) or intersect[0] in ['C', 'D', 'H', 'S'] : # if no value has been found
+                        val = min([v1, v2], key=lambda elem: elem[2])[0]     # take most likely value (this is a hack)
+                    else :
+                        val = intersect
+
+                    if val[-1] not in ['C', 'D', 'H', 'S'] :                    # if no suit has been found
+                        ss = [(s, k) for k, s in enumerate(suits) if (np.linalg.norm(v1[1] - s[1]) < 100 or np.linalg.norm(v2[1] - s[1]) < 100)]
+                        s, k = min(ss, key=lambda elem: elem[0][2]) if len(ss) else ('', None) # take most likely suit (this is a hack)
+                        if not k :                                              # no suit was found
+                            lik = .8*(v1[2] + v2[2])                            # this is quite literally the worst
+                            val = min([v1, v2], key=lambda elem: elem[2])[0]
+                        else :                                                  # a suit was found
                             to_remove_s.add(k)
                             val = val + s[0]
-                            lik = .5*(v1[2] + v2[2] + s[2])
+                            lik = .4*(v1[2] + v2[2] + s[2])                     # consider this unlikely, and is not to be preferred
+                    else :
+                        lik = .5*(v1[2] + v2[2])
+
                     to_remove_v.add(i)
                     to_remove_v.add(j)
                     detected_cards.append((val, loc, lik))
+                    # print(f"accepted {val}")
+
     vals  = [v for i, v in enumerate(vals)  if i not in to_remove_v]
     suits = [s for j, s in enumerate(suits) if j not in to_remove_s]
     detected_cards = sorted(detected_cards + vals, key=lambda val : val[2])
     detected_cards = detected_cards[:expected_cards]
-
-
-
 
 
     if disp :
@@ -295,10 +310,12 @@ if __name__ == '__main__':
     #     guess_cards(img, card_space, expected_cards=5, disp=True, title="{}_{}".format(cards_name, str(n).zfill(2)))
     # plt.show()
 
-    cards_list = [0, 2, 3, 4, 5, 7, 8, 9]
+    # cards_list = [0, 2, 3, 4, 5, 7, 8, 9]
+    cards_list = [3, 8]
     cards_name = 'cards1'
     for n in cards_list :
         img = get_img(n, cards_name)
+        print(f"img {n}")
 
         # print results
         guess_cards(img, card_space, expected_cards=2, disp=True, title="{}_{}".format(cards_name, str(n).zfill(2)))
