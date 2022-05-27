@@ -1,5 +1,5 @@
 #!/usr/bin/env python3.8
-
+import pickle
 from preprocessing import *
 
 
@@ -113,6 +113,29 @@ def show_card_space(card_space) :
 
     [ax.axis('off') for ax in axes.ravel()]
 
+def save_card_space(card_space, filename="cardspace.pkl") :
+    """
+    dump the card-space to a PKL file
+    """
+    save_path = os.path.join(os.getcwd(), 'data', 'models')
+    if not os.path.exists(save_path) :
+        os.makedirs(save_path)
+
+    file_path = os.path.join(save_path, filename)
+    file = open(file_path, "wb")
+    pickle.dump(card_space, file)
+    file.close()
+
+def load_card_space(filename="cardspace.pkl") :
+    """
+    read a card-space from a PKL file
+    """
+    file_path = os.path.join(os.getcwd(), 'data', 'models', filename)
+    file = open(file_path, "rb")
+    card_space = pickle.load(file)
+    file.close()
+    return card_space
+
 def detect_card_vals(img, card_space, thresh=0.2, min_dist=40, nb_vals=3) :
     """
     tries to detect the card values of all cards in a given image
@@ -159,11 +182,16 @@ def detect_card_vals(img, card_space, thresh=0.2, min_dist=40, nb_vals=3) :
 if __name__ == '__main__':
 
     nb_descr = 10
+    # for nb_descr in range(1,11) :
+    #     card_space = make_card_space(nb_descr=10*nb_descr)
+    #     save_card_space(card_space, f"cardspace_{10*nb_descr}.pkl")
+    # exit()
 
-    card_space = make_card_space(nb_descr=nb_descr)
+    # card_space = load_card_space(f"cardspace_{nb_descr}.pkl")
+    # show_card_space(card_space)
+    # plt.show()
 
-    show_card_space(card_space)
-    plt.show()
+    exit()
 
     cards_list = [4, 14, 17, 18] #[0, 2, 3, 4, 5, 7, 8, 9]
     cards_name = 'cardst'

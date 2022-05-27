@@ -267,3 +267,5 @@ dmypy.json
 !*/data/?/*
 !*/data/10/
 !*/data/10/*
+!*/data/models/
+!*/data/models/*
