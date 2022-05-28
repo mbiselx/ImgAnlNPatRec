@@ -324,7 +324,7 @@ def guess_cards(img, card_space, nb_cards=1, disp=False, title='') :
     detected_cards = detected_cards[:nb_cards]
 
     if disp :                                                                   # display the image and detected things
-        show_img(img, title)
+        show_img(img, title + " " + str([c[0] for c in sorted(detected_cards, key=lambda c: c[1][1])]))
         for card in detected_cards :
             plt.text(card[1][1]+10, card[1][0]+10, card[0], color='limegreen', size=20)
         for v in vals :
