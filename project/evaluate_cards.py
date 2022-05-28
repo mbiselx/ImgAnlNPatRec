@@ -1,4 +1,5 @@
 #!/usr/bin/env python3.8
+import random  # this is always a good sign ...
 import pickle
 import os
 import time
@@ -62,14 +63,11 @@ def get_relevant_contours(img, ll=65, lh=300) :
     get the contours from an image which could represent a number
     """
     img_to_cont = img if len(img.shape) < 3 else skimage.color.rgb2gray(img)
-    #img_to_cont =  skimage.filters.gaussian(img_to_cont, sigma=.5)
-    # img_to_cont =  skimage.filters.unsharp_mask(img_to_cont)
     contours = skimage.measure.find_contours(img_to_cont, 0.7) +                \
                skimage.measure.find_contours(img_to_cont, 0.8) +                \
                skimage.measure.find_contours(img_to_cont, 0.9)
 
     return filter(lambda cont : (len(cont) > ll and len(cont) < lh), contours)  # only return the relevant contours
-
 
 def get_fourier_descriptors(contour, nb_descr=2, descr_idx=[], make_contour=False) :
     """
@@ -88,7 +86,6 @@ def get_fourier_descriptors(contour, nb_descr=2, descr_idx=[], make_contour=Fals
     location    = np.array([fft_cont[0].real, fft_cont[0].imag])/fft_cont.shape[0] # get the location of the center
     # rotation    = np.exp(-1j*(np.angle(fft_cont[1]) + np.angle(fft_cont[0])))                             # rotation is given by the phase of the non-DC component
     rotation    = np.exp(-1j*np.angle(fft_cont[1]))
-    # rotation    = 1
     descriptors = fft_cont[descr_idx[descr_idx!=0]]                             # remove the idx '0' (location)
 
     # step 4 : normalize descriptors onto the unit ball, but keep their relative phases
@@ -108,7 +105,6 @@ def get_fourier_descriptors(contour, nb_descr=2, descr_idx=[], make_contour=Fals
         aprx_cont = np.fft.ifft(aprx_cont)
         aprx_cont = np.array([aprx_cont.real, aprx_cont.imag]).T
         return location, descriptors, aprx_cont, rotation
-
 
 def make_avg_descr(card, nb_descr=10, make_contour=False) :
     """
@@ -292,7 +288,7 @@ def guess_cards(img, card_space, nb_cards=1, disp=False, title='') :
                         break # the card location doesn't make sense
 
                     if not len(intersect) or intersect[0] in ['C', 'D', 'H', 'S'] : # if no value has been found
-                        val = min([v1, v2], key=lambda elem: elem[2])[0]     # take most likely value (this is a hack)
+                        val = min([v1, v2], key=lambda elem: elem[2])[0]        # take most likely value (this is a hack)
                     else :
                         val = intersect
 
@@ -300,8 +296,8 @@ def guess_cards(img, card_space, nb_cards=1, disp=False, title='') :
                         ss = [(s, k) for k, s in enumerate(suits) if (np.linalg.norm(v1[1] - s[1]) < 100 or np.linalg.norm(v2[1] - s[1]) < 100)]
                         s, k = min(ss, key=lambda elem: elem[0][2]) if len(ss) else ('', None) # take most likely suit (this is a hack)
                         if not k :                                              # no suit was found
+                            val = val + random.choice(['C', 'D', 'H', 'S'])     # assign a random suit
                             lik = .8*(v1[2] + v2[2])                            # this is quite literally the worst
-                            val = min([v1, v2], key=lambda elem: elem[2])[0]
                         else :                                                  # a suit was found
                             to_remove_s.add(k)
                             val = val + s[0]
@@ -313,7 +309,16 @@ def guess_cards(img, card_space, nb_cards=1, disp=False, title='') :
                     to_remove_v.add(j)
                     detected_cards.append((val, loc, lik))
 
-    vals  = [(v[0], v[1], 1.5*v[2]) for i, v in enumerate(vals) if i not in to_remove_v]
+    vv = []
+    for i, val in enumerate(vals) :
+        if i not in to_remove_v :
+            if val[0][-1] not in ['C', 'D', 'H', 'S'] :
+                vs = val[0] + random.choice(['C', 'D', 'H', 'S'])               # if no suit was found : random assignemnt
+            else :
+                vs = val[0]
+            vv.append((vs, val[1], 1.5*val[2]))
+    vals = vv
+
     suits = [s for j, s in enumerate(suits) if j not in to_remove_s]
     detected_cards = sorted(detected_cards + vals, key=lambda val : val[2])     # add the raw values to the detected cards
     detected_cards = detected_cards[:nb_cards]
