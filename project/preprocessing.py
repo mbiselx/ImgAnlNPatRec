@@ -7,6 +7,9 @@ from skimage import color, exposure, feature, filters, io, measure, morphology, 
 from scipy import ndimage as ndi
 import matplotlib.pyplot as plt
 
+# homemate stuff
+import evaluate_cards
+
 ################################################################################
 # general image pre-procsesing functions
 ################################################################################
@@ -262,7 +265,11 @@ def count_chips(img, show=False):
 
 class PlayerSegment:
     def __init__(self, id=0, img=np.array([]), guess=None, is_rotated=False, has_folded=None):
+        """
+        initializes the 'player' table segment
+        """
 
+        # preprocessing
         if guess :
             crop = slice(max(int(guess[0]-.125*img.shape[0]), 0), min(int(guess[0]+.125*img.shape[0]), img.shape[0])), \
                    slice(max(int(guess[1]-.125*img.shape[1]), 0), min(int(guess[1]+.125*img.shape[1]), img.shape[1]))
@@ -281,54 +288,119 @@ class PlayerSegment:
 
         self.id         = id
         self.img        = img
+        self.has_folded = has_folded
+        self.cards      = []
+        self.cards_loc  = []
 
-        if has_folded is not None :
-            self.has_folded = has_folded
-        elif len(img):
-            self.has_folded = check_card_back_presence(img)
-        else :
-            self.has_folded = False
-
-    def extract_player_cards(self, img, guess) :
+    def get_cards(self, card_space=None) :
         """
-        takes a full table image and a guess at the center location of the player's cards
-        returns an image segment centered around the player's cards
+        processes the image segement to detect the value of the cards.
+        returns the detected cards as a list
+        [card1 card2]
         """
 
-        x   = slice(max(int(guess[1]-.125*img.shape[1]), 0), min(int(guess[1]+.125*img.shape[1]), img.shape[1]))
-        y   = slice(max(int(guess[0]-.125*img.shape[0]), 0), min(int(guess[0]+.125*img.shape[0]), img.shape[0]))
-        com = get_center_of_cards(img[y, x]) + np.array([y.start, x.start])
-        x   = slice(max(int(com[1]-.13*img.shape[1]), 0), min(int(com[1]+.13*img.shape[1]), img.shape[1]))
-        y   = slice(max(int(com[0]-.13*img.shape[0]), 0), min(int(com[0]+.13*img.shape[0]), img.shape[0]))
-        return img[y, x]
+        # check to see if there even are any cards to detect
+        if self.has_folded is None :
+            self.has_folded = check_card_back_presence(self.img)
+
+        if self.has_folded :
+            return []
+
+        # use the 'evaluate_cards' module to evaluate the cards
+        if not card_space :
+            card_space = evaluate_cards.load_card_space("cardspace_20.pkl")
+        detected_cards = evaluate_cards.guess_cards(self.img, card_space, nb_cards=2)
+
+        #extract the relevant information from the modeule's output
+        self.cards, self.cards_loc = zip(*[(c[0], c[1]) for c in detected_cards])
+        return self.cards
 
     def show(self, ax=None):
         if not ax :
             fig = plt.figure()
             ax = fig.add_subplot(1,1,1)
         ax.imshow(self.img)
-        ax.set_title("p{}: {}".format(self.id, "has folded" if self.has_folded else "is playing" ))
+        for card, loc in zip(self.cards, self.cards_loc) :
+            ax.text(loc[1], loc[0], card, color='dodgerblue', size=15)
+        ax.set_title("p{}: {}".format(self.id, "has folded" if self.has_folded else ("is playing")))
         ax.axis('off')
 
     def save(self, n=0):
         save_img(self.img, n, img_type=('folds' if self.has_folded else 'cards')+str(self.id))
 
+class CommunitySegment:
+    def __init__(self, img, cropped=False):
+        """
+        initializes the 'community cards' table segment
+        """
+        # preprocessing
+        if not cropped :
+            crop = slice(int(1500/2000*img.shape[0]), int(2000/2000*img.shape[0])), \
+                   slice(int( 200/2000*img.shape[1]), int(1800/2000*img.shape[1]))
+            img = img[crop]
+        self.img = img
+
+    def get_cards(self, card_space=None) :
+        """
+        processes the image segement to detect the value of the cards.
+        returns the detected cards as a list
+        [card1 card2]
+        """
+
+        # use the 'evaluate_cards' module to evaluate the cards
+        if not card_space :
+            card_space = evaluate_cards.load_card_space("cardspace_20.pkl")
+        detected_cards = evaluate_cards.guess_cards(self.img, card_space, nb_cards=5)
+
+        #extract the relevant information from the modeule's output
+        self.cards, self.cards_loc = zip(*[(c[0], c[1]) for c in detected_cards])
+        return self.cards
+
+    def show(self, ax=None):
+        if not ax :
+            fig = plt.figure()
+            ax = fig.add_subplot(1,1,1)
+        ax.imshow(self.img)
+        for card, loc in zip(self.cards, self.cards_loc) :
+            ax.text(loc[1], loc[0], card, color='dodgerblue', size=15)
+        ax.set_title("community cards")
+        ax.axis('off')
+
+    def save(self, n=0):
+        save_img(self.img, n, img_type='cardsc')
+
 
 class ChipsSegment:
     def __init__(self, img, cropped=False):
+        """
+        initializes the 'chips' table segment
+        """
 
         # preprocessing
         if not cropped :
             crop = slice(int( 500/2000*img.shape[0]), int(1500/2000*img.shape[0])), \
                    slice(int( 500/2000*img.shape[1]), int(1500/2000*img.shape[1]))
             img = img[crop]
+        self.img = img
 
+        self.nb_chips = []
+        self.centers  = []
+        self.radii    = 70/1000*self.img.shape[0]
+
+    def get_nb_chips(self):
+        """
+        processes the image segement to detect the presence of chips.
+        counts the chips present and returns them in an array as
+        [CR, CG, CB, CK, CW]
+
+        sometimes has trouble detecting white chips
+        """
 
         # blur image to reduce noise
-        self.img = skimage.filters.gaussian(img, sigma=3/1000*img.shape[0], multichannel=True)
+        working_img = skimage.filters.gaussian(self.img, sigma=3/1000*self.img.shape[0], multichannel=True)
 
         # get the hsv channels for thresholding
-        hue_img, sat_img, value_img = get_hsv_channels(self.img)
+        hue_img, sat_img, value_img = get_hsv_channels(working_img)
 
         # retrieve chips that are easily visible
         binary_color = np.logical_and(sat_img > .2, value_img > .5) # first find all bright colors
@@ -342,17 +414,13 @@ class ChipsSegment:
                                             np.logical_or(binary_B, binary_K)))
 
         # the white chips suck
-        img_gray = skimage.color.rgb2gray(self.img)
+        img_gray = skimage.color.rgb2gray(working_img)
         plow, phigh = np.percentile(img_gray[mask], (2, 99))
         img_gray[mask] = skimage.exposure.rescale_intensity(img_gray[mask], (plow, phigh))
         binary_W = img_gray > .95
 
         # OK, we should have everything now
         binary_img_list = [binary_R, binary_G, binary_B, binary_K, binary_W]
-
-        self.nb_chips = []
-        self.centers  = []
-        self.radii    = 70/1000*self.img.shape[0]
 
         # find the edges of the patches and check if they're circles
         for img in binary_img_list:
@@ -367,7 +435,6 @@ class ChipsSegment:
             self.centers.append(np.array([cy, cx]).T)
             self.nb_chips.append(len(accums))
 
-    def get_nb_chips():
         return self.nb_chips
 
     def show(self, ax=None):
@@ -375,7 +442,10 @@ class ChipsSegment:
             fig = plt.figure()
             ax = fig.add_subplot(1,1,1)
         ax.imshow(self.img)
-        ax.set_title("CR: {}, CG: {}, CB: {}, CK: {}, CW: {}".format(self.nb_chips[0], self.nb_chips[1], self.nb_chips[2], self.nb_chips[3], self.nb_chips[4]))
+        if len(self.nb_chips) :
+            ax.set_title("CR: {}, CG: {}, CB: {}, CK: {}, CW: {}".format(self.nb_chips[0], self.nb_chips[1], self.nb_chips[2], self.nb_chips[3], self.nb_chips[4]))
+        else :
+            ax.set_title("chips not yet counted")
         ax.axis('off')
 
         theta = np.linspace(0,2*np.pi, 10)
@@ -409,33 +479,52 @@ class TableSegments:
 
         # player 1
         guess = (1000/2000*img.shape[0], 1750/2000*img.shape[1])
-        self.player = [PlayerSegment(1, img, guess)]
+        self.players = [PlayerSegment(1, img, guess)]
 
         # player 2
         guess = ( 250/2000*img.shape[0], 1425/2000*img.shape[1])
-        self.player.append(PlayerSegment(2, img, guess))
+        self.players.append(PlayerSegment(2, img, guess))
 
         # player 3
         guess = ( 250/2000*img.shape[0],  550/2000*img.shape[1])
-        self.player.append(PlayerSegment(3, img, guess))
+        self.players.append(PlayerSegment(3, img, guess))
 
         # player 4
         guess = (1050/2000*img.shape[0],  250/2000*img.shape[1])
-        self.player.append(PlayerSegment(4, img, guess))
+        self.players.append(PlayerSegment(4, img, guess))
 
         print("---- %.3f seconds to extract players" % (time.time() - tic))
 
         # table
         tic = time.time()
-        xl, xh = int( 200/2000*img.shape[1]), int(1800/2000*img.shape[1])
-        yl, yh = int(1500/2000*img.shape[0]), int(2000/2000*img.shape[0])
-        self.T = img[yl:yh, xl:xh]
-        print("---- %.3f seconds to extract table cards" % (time.time() - tic))
+        self.community = CommunitySegment(img)
+        print("---- %.3f seconds to extract community cards" % (time.time() - tic))
 
         # chips
         tic = time.time()
         self.chips = ChipsSegment(img)
-        print("---- %.3f seconds to extract and count chips" % (time.time() - tic))
+        print("---- %.3f seconds to extract chips" % (time.time() - tic))
+
+    def evaluate(self, card_space=None) :
+        """
+        tries to evaluate image of the table
+        """
+
+        if not card_space :
+            card_space = evaluate_cards.load_card_space("cardspace_20.pkl")
+
+        tic = time.time()
+        self.community.get_cards(card_space)
+        print("---- %.3f seconds to count community cards" % (time.time() - tic))
+
+        tic = time.time()
+        for player in self.players :
+            player.get_cards(card_space)
+        print("---- %.3f seconds to count player cards" % (time.time() - tic))
+
+        tic = time.time()
+        self.chips.get_nb_chips()
+        print("---- %.3f seconds to count chips" % (time.time() - tic))
 
     def show(self, title='') :
         fig = plt.figure()
@@ -444,21 +533,21 @@ class TableSegments:
         ax1 = fig.add_subplot(3,4,(1,4))
         self.chips.show(ax1)
 
-
         ax2 = fig.add_subplot(3,4,(5,8))
-        ax2.imshow(self.T)
-        ax2.set_title("T")
-        ax2.axis('off')
+        self.community.show(ax2)
+        # ax2.imshow(self.T)
+        # ax2.set_title("T")
+        # ax2.axis('off')
 
         for i in range(4) :
             ax = fig.add_subplot(3,4,9+i)
-            self.player[i].show(ax)
+            self.players[i].show(ax)
 
         fig.tight_layout()
 
     def save(self, n) :
         save_img(self.img, n, img_type='table_eq')
-        [player.save(n) for player in self.player]
+        [player.save(n) for player in self.players]
         self.chips.save(n)
 
         save_img(self.T, n, img_type='cardst')
@@ -473,19 +562,25 @@ if __name__ == '__main__' :
 
 
     # for n in [1,2,3,8,21,22] :
-    # for n in [0, 1] :
-    for n in training_set:
+    for n in [0] :
+    # for n in training_set:
 
         # get img
+        start_time = time.time()
         print("\nprocessing img %d:" % n)
 
-        # tic = time.time()
-        # img =  get_img(n)[::2,::2,:]
-        # print("-- %.3f seconds to load image" % (time.time() - tic))
-        #
-        # tic = time.time()
-        # segments = TableSegments(img)
-        # print("-- %.3f seconds to segment image" % (time.time() - tic))
+        tic = time.time()
+        img =  get_img(n)[::2,::2,:]
+        print("-- %.3f seconds to load image" % (time.time() - tic))
+
+        tic = time.time()
+        segments = TableSegments(img)
+        print("-- %.3f seconds to segment image" % (time.time() - tic))
+
+        tic = time.time()
+        segments.evaluate()
+        print("-- %.3f seconds to evaluate image" % (time.time() - tic))
+
         #
         # tic = time.time()
         # segments.save(n)
@@ -500,10 +595,8 @@ if __name__ == '__main__' :
         # print("-- %.3f seconds to segment image" % (time.time() - tic))
 
 
+        segments.show("train_{}.jpg".format(str(n).zfill(2)))
 
-
-
-
-        # segments.show("train_{}.jpg".format(str(n).zfill(2)))
+        print("%.3f seconds to process image %d" % (time.time() - start_time, n))
 
     plt.show()
