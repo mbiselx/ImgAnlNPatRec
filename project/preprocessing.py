@@ -509,7 +509,7 @@ class ChipsSegment:
         if len(self.centers) :
             ax.set_title(str(self.nb_chips))
         else :
-            ax.set_title("chips not yet counted")
+            ax.set_title("chips")
         ax.axis('off')
 
         theta = np.linspace(0,2*np.pi, 10)
