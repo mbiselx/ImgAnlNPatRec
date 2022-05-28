@@ -200,7 +200,7 @@ def detect_card_symbols(img, card_space, thresh=0.15, min_dist=20, nb_syms=None)
     """
     detected_syms = []
     nb_descr = len(card_space[list(card_space.keys())[0]])
-    for contour in get_relevant_contours(skimage.filters.unsharp_mask(img, amount=.3, multichannel=True)) :
+    for contour in get_relevant_contours(skimage.filters.unsharp_mask(img, amount=.3, channel_axis=2)) :
         location, descriptors, _ = get_fourier_descriptors(contour, nb_descr)
 
         closest_sym = sorted([(np.linalg.norm(np.abs(descriptors) - np.abs(card_space[sym])), sym) for sym in card_space])[0]
@@ -343,7 +343,7 @@ if __name__ == '__main__':
     # plt.show()
     # exit()
 
-    # cards_list = [4, 14, 17, 18] #[0, 2, 3, 4, 5, 7, 8, 9]
+    # cards_list = [4, 14] #[0, 2, 3, 4, 5, 7, 8, 9]
     # cards_name = 'cardst'
     # for n in cards_list :
     #     img = get_img(n, cards_name)

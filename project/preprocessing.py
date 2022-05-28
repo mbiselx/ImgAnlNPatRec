@@ -289,7 +289,7 @@ class PlayerSegment:
         self.id         = id
         self.img        = img
         self.has_folded = has_folded
-        self.cards      = []
+        self.cards      = dict()
         self.cards_loc  = []
 
     def get_cards(self, card_space=None) :
@@ -311,8 +311,25 @@ class PlayerSegment:
             card_space = evaluate_cards.load_card_space("cardspace_20.pkl")
         detected_cards = evaluate_cards.guess_cards(self.img, card_space, nb_cards=2)
 
-        #extract the relevant information from the modeule's output
-        self.cards, self.cards_loc = zip(*[(c[0], c[1]) for c in detected_cards])
+        # if we failed to detect any cards at all
+        if not len(detected_cards) :
+            for i in range(2) :
+                self.cards[f'P{self.id}{i+1}'] = ''
+            return self.cards
+
+        # cards are read from left to right
+        detected_cards = sorted(detected_cards, key=lambda c: c[1][1])
+
+        #extract the relevant information from the module's output
+        cards, self.cards_loc = zip(*[(c[0], c[1]) for c in detected_cards])
+
+        # smash cards into the output format
+        for i in range(2) :
+            self.cards[f'P{self.id}{i+1}'] = cards[i] if i < len(cards) else ''
+
+        return self.cards
+
+    def return_results(self) :
         return self.cards
 
     def show(self, ax=None):
@@ -320,8 +337,8 @@ class PlayerSegment:
             fig = plt.figure()
             ax = fig.add_subplot(1,1,1)
         ax.imshow(self.img)
-        for card, loc in zip(self.cards, self.cards_loc) :
-            ax.text(loc[1], loc[0], card, color='dodgerblue', size=15)
+        for i, loc in enumerate(self.cards_loc) :
+            ax.text(loc[1], loc[0], self.cards[f'P{self.id}{i+1}'], color='dodgerblue', size=15)
         ax.set_title("p{}: {}".format(self.id, "has folded" if self.has_folded else ("is playing")))
         ax.axis('off')
 
@@ -339,6 +356,8 @@ class CommunitySegment:
                    slice(int( 200/2000*img.shape[1]), int(1800/2000*img.shape[1]))
             img = img[crop]
         self.img = img
+        self.cards = dict()
+        self.cards_loc = []
 
     def get_cards(self, card_space=None) :
         """
@@ -352,8 +371,25 @@ class CommunitySegment:
             card_space = evaluate_cards.load_card_space("cardspace_20.pkl")
         detected_cards = evaluate_cards.guess_cards(self.img, card_space, nb_cards=5)
 
-        #extract the relevant information from the modeule's output
-        self.cards, self.cards_loc = zip(*[(c[0], c[1]) for c in detected_cards])
+        # if we failed to detect any cards at all
+        if not len(detected_cards) :
+            for i in range(5) :
+                self.cards[f'T{i+1}'] = ''
+            return self.cards
+
+        # cards are read from left to right
+        detected_cards = sorted(detected_cards, key=lambda c: c[1][1])
+
+        #extract the relevant information from the module's output
+        cards, self.cards_loc = zip(*[(c[0], c[1]) for c in detected_cards])
+
+        # smash cards into the output format
+        for i in range(5) :
+            self.cards[f'T{i+1}'] = cards[i] if i < len(cards) else ''
+
+        return self.cards
+
+    def return_results(self) :
         return self.cards
 
     def show(self, ax=None):
@@ -361,8 +397,8 @@ class CommunitySegment:
             fig = plt.figure()
             ax = fig.add_subplot(1,1,1)
         ax.imshow(self.img)
-        for card, loc in zip(self.cards, self.cards_loc) :
-            ax.text(loc[1], loc[0], card, color='dodgerblue', size=15)
+        for i, loc in enumerate(self.cards_loc) :
+            ax.text(loc[1], loc[0], self.cards[f'T{i+1}'], color='dodgerblue', size=15)
         ax.set_title("community cards")
         ax.axis('off')
 
@@ -383,7 +419,7 @@ class ChipsSegment:
             img = img[crop]
         self.img = img
 
-        self.nb_chips = []
+        self.nb_chips = dict()
         self.centers  = []
         self.radii    = 70/1000*self.img.shape[0]
 
@@ -397,7 +433,7 @@ class ChipsSegment:
         """
 
         # blur image to reduce noise
-        working_img = skimage.filters.gaussian(self.img, sigma=3/1000*self.img.shape[0], multichannel=True)
+        working_img = skimage.filters.gaussian(self.img, sigma=3/1000*self.img.shape[0], channel_axis=2)
 
         # get the hsv channels for thresholding
         hue_img, sat_img, value_img = get_hsv_channels(working_img)
@@ -423,7 +459,7 @@ class ChipsSegment:
         binary_img_list = [binary_R, binary_G, binary_B, binary_K, binary_W]
 
         # find the edges of the patches and check if they're circles
-        for img in binary_img_list:
+        for img, lbl in zip(binary_img_list, ["CR", "CG", "CB", "CK", "CW"]):
             # binary edges
             img_edg = skimage.filters.sobel(img) > 0
 
@@ -433,8 +469,11 @@ class ChipsSegment:
 
             # outputs
             self.centers.append(np.array([cy, cx]).T)
-            self.nb_chips.append(len(accums))
+            self.nb_chips[lbl] = len(accums)
 
+        return self.nb_chips
+
+    def return_results(self) :
         return self.nb_chips
 
     def show(self, ax=None):
@@ -442,8 +481,8 @@ class ChipsSegment:
             fig = plt.figure()
             ax = fig.add_subplot(1,1,1)
         ax.imshow(self.img)
-        if len(self.nb_chips) :
-            ax.set_title("CR: {}, CG: {}, CB: {}, CK: {}, CW: {}".format(self.nb_chips[0], self.nb_chips[1], self.nb_chips[2], self.nb_chips[3], self.nb_chips[4]))
+        if len(self.centers) :
+            ax.set_title(str(self.nb_chips))
         else :
             ax.set_title("chips not yet counted")
         ax.axis('off')
@@ -475,6 +514,7 @@ class TableSegments:
             tic = time.time()
 
         self.img = img
+        self.results = dict()
 
 
         # player 1
@@ -510,21 +550,32 @@ class TableSegments:
         tries to evaluate image of the table
         """
 
+        self.results = dict()
         if not card_space :
             card_space = evaluate_cards.load_card_space("cardspace_20.pkl")
 
         tic = time.time()
-        self.community.get_cards(card_space)
+        community_cards = self.community.get_cards(card_space)
         print("---- %.3f seconds to count community cards" % (time.time() - tic))
 
         tic = time.time()
-        for player in self.players :
-            player.get_cards(card_space)
+        player_cards = [player.get_cards(card_space) for player in self.players]
         print("---- %.3f seconds to count player cards" % (time.time() - tic))
 
         tic = time.time()
-        self.chips.get_nb_chips()
+        chips = self.chips.get_nb_chips()
         print("---- %.3f seconds to count chips" % (time.time() - tic))
+
+
+        self.results = community_cards
+        for p in player_cards :
+            self.results = {**self.results, **p}
+        self.results = {**self.results, **chips}
+        return self.results
+
+    def return_results(self) :
+        return self.nb_chips
+
 
     def show(self, title='') :
         fig = plt.figure()
@@ -578,7 +629,7 @@ if __name__ == '__main__' :
         print("-- %.3f seconds to segment image" % (time.time() - tic))
 
         tic = time.time()
-        segments.evaluate()
+        results = segments.evaluate()
         print("-- %.3f seconds to evaluate image" % (time.time() - tic))
 
         #
@@ -596,6 +647,7 @@ if __name__ == '__main__' :
 
 
         segments.show("train_{}.jpg".format(str(n).zfill(2)))
+        print(results)
 
         print("%.3f seconds to process image %d" % (time.time() - start_time, n))
 
