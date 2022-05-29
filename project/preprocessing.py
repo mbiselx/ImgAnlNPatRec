@@ -163,7 +163,7 @@ def register_table(img, autoscale=False, out_size=2000) :
     corners = dwn_f * get_table_corners(img_smol)
 
     if not len(corners) :
-        print("ERR: No corners detected!")
+        # print("ERR: No corners detected!")
         return img, corners
 
     img_size = np.min(img.shape[0:2])
@@ -223,7 +223,7 @@ def get_center_of_cards(img, sigma=1.5) :
 
     return com
 
-def check_card_back_presence(img, thresh=.4):
+def check_card_back_presence(img, thresh=.4, show=False):
     """
     check for the presence of the pattern present on the backs of the cards
     using fast auto-correlation and a heuristic threshold
@@ -236,6 +236,11 @@ def check_card_back_presence(img, thresh=.4):
 
     roi        = (slice(auto_corr.shape[0]//16, auto_corr.shape[0]//2),         # region of interest
                   slice(auto_corr.shape[1]//16, auto_corr.shape[1]//2))
+
+    if show :
+        fig, axes = plt.subplots(1,2)
+        show_img(img, 'original image', ax=axes[0])
+        show_img(np.fft.fftshift(auto_corr), 'autocorrelation', ax=axes[1])
 
     return np.any(auto_corr[roi] > thresh)
 
@@ -306,6 +311,16 @@ class PlayerSegment:
         self.cards      = dict()
         self.cards_loc  = []
 
+    def check_card_back_presence(self, thresh=.4, show=False):
+        """
+        check for the presence of the pattern present on the backs of the cards
+        using fast auto-correlation and a heuristic threshold
+        """
+
+        self.has_folded = check_card_back_presence(self.img, thresh=thresh, show=show)
+        return self.has_folded
+
+
     def get_cards(self, card_space=None) :
         """
         processes the image segement to detect the value of the cards.
@@ -315,7 +330,7 @@ class PlayerSegment:
 
         # check to see if there even are any cards to detect
         if self.has_folded is None :
-            self.has_folded = check_card_back_presence(self.img)
+            self.check_card_back_presence()
 
         if self.has_folded :
             for i in range(2) :
@@ -463,6 +478,8 @@ class ChipsSegment:
         binary_B = np.logical_and(binary_color, np.logical_and(hue_img > .55, hue_img < .70))
         binary_K = np.logical_and(np.logical_not(binary_color), value_img < .5)
 
+        del hue_img, sat_img, value_img
+
         # mask the chips that have been found to avoid finding them again
         mask = np.logical_not(np.logical_or(np.logical_or(binary_R, binary_G),
                                             np.logical_or(binary_B, binary_K)))
@@ -472,15 +489,18 @@ class ChipsSegment:
         plow, phigh = np.percentile(img_gray[mask], (2, 99))
         img_gray[mask] = skimage.exposure.rescale_intensity(img_gray[mask], (plow, phigh))
         binary_W = img_gray > .95
+        del working_img, mask, img_gray
 
         # OK, we should have everything now
         binary_img_list = [binary_R, binary_G, binary_B, binary_K, binary_W]
         if show : show_img_list(binary_img_list, ["R", "G", "B", "K", "W"], ax=ax)
 
         # find the edges of the patches and check if they're circles
+        edg_img_list = []
         for img, lbl in zip(binary_img_list, ["CR", "CG", "CB", "CK", "CW"]):
             # binary edges
             img_edg = skimage.filters.sobel(img) > 0
+            if show : edg_img_list.append(img_edg)
 
             # hough transform (which is fast-ish because we only check one possible radius)
             hspace = skimage.transform.hough_circle(img_edg, [self.radii])
@@ -490,11 +510,8 @@ class ChipsSegment:
             self.centers.append(np.array([cy, cx]).T)
             self.nb_chips[lbl] = len(accums)
 
-        if show :
-            if not len(ax) :
-                self.show()
-            else :
-                self.show(ax=ax[-1])
+        if show : show_img_list(edg_img_list, ["edges R", "edges G", "edges B", "edges K", "edges W"], ax=ax)
+        if show : self.show()
 
         return self.nb_chips
 
@@ -529,7 +546,7 @@ class TableSegments:
         if not is_registered :
             img, corners = register_table(img)
             print("---- %.3f seconds to register table" % (time.time() - tic))
-            assert len(corners), "table corners could not be detected"
+            assert len(corners), "ERR : table corners could not be detected"
             tic = time.time()
 
         if not is_equalized :
@@ -635,7 +652,7 @@ if __name__ == '__main__' :
 
 
     # for n in [1,2,3,8,21,22] :
-    for n in [0] :
+    for n in [1] :
     # for n in training_set:
 
         # get img
@@ -650,7 +667,9 @@ if __name__ == '__main__' :
         segments = TableSegments(img)
         print("-- %.3f seconds to segment image" % (time.time() - tic))
 
-        segments.chips.get_nb_chips(True)
+        # segments.chips.get_nb_chips(True)
+        segments.players[0].check_card_back_presence(show=True)
+        segments.players[1].check_card_back_presence(show=True)
 
         # tic = time.time()
         # results = segments.evaluate()
